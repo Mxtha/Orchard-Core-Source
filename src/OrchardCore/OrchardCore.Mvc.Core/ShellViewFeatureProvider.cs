@@ -81,10 +81,11 @@ namespace OrchardCore.Mvc
 
             var modules = _applicationContext.Application.Modules;
             var moduleFeature = new ViewsFeature();
-            var assembliesWithViews = new List<(Assembly Assembly, Modules.Module Module)>();
-
+            
             foreach (var module in modules)
             {
+                var assembliesWithViews = new List<Assembly>();
+
                 var relatedAssemblyAttribute = module.Assembly.GetCustomAttribute<RelatedAssemblyAttribute>();
 
                 // Is there a dedicated Views assembly (< net6.0)
@@ -97,8 +98,7 @@ namespace OrchardCore.Mvc
                         try
                         {
                             var assembly = Assembly.LoadFile(precompiledAssemblyPath);
-
-                            assembliesWithViews.Add( new (assembly, module));
+                            assembliesWithViews.Add(assembly);
                         }
                         catch (FileLoadException)
                         {
@@ -111,45 +111,45 @@ namespace OrchardCore.Mvc
 
                 if (module.Assembly.GetCustomAttributes<RazorCompiledItemAttribute>().Any())
                 {
-                    assembliesWithViews.Add(new (module.Assembly, module));
-                }
-            }
-
-            foreach (var entry in assembliesWithViews)
-            {
-                var applicationPart = new ApplicationPart[] { new CompiledRazorAssemblyPart(entry.Assembly) };
-
-                foreach (var provider in mvcFeatureProviders)
-                {
-                    provider.PopulateFeature(applicationPart, moduleFeature);
+                    assembliesWithViews.Add(module.Assembly);
                 }
 
-                // Razor views are precompiled in the context of their modules, but at runtime
-                // their paths need to be relative to the virtual "Areas/{ModuleId}" folders.
-                // Note: For the app's module this folder is "Areas/{env.ApplicationName}".
-                foreach (var descriptor in moduleFeature.ViewDescriptors)
+                foreach (var assembly in assembliesWithViews)
                 {
-                    descriptor.RelativePath = '/' + entry.Module.SubPath + descriptor.RelativePath;
-                    feature.ViewDescriptors.Add(descriptor);
-                }
+                    var applicationPart = new ApplicationPart[] { new CompiledRazorAssemblyPart(assembly) };
 
-                // For the app's module we still allow to explicitly specify view paths relative to the app content root.
-                // So for the application's module we re-apply the feature providers without updating the relative paths.
-                // Note: This is only needed in prod mode if app's views are precompiled and views files no longer exist.
-                if (entry.Module.Name == _hostingEnvironment.ApplicationName)
-                {
                     foreach (var provider in mvcFeatureProviders)
                     {
                         provider.PopulateFeature(applicationPart, moduleFeature);
                     }
 
+                    // Razor views are precompiled in the context of their modules, but at runtime
+                    // their paths need to be relative to the virtual "Areas/{ModuleId}" folders.
+                    // Note: For the app's module this folder is "Areas/{env.ApplicationName}".
                     foreach (var descriptor in moduleFeature.ViewDescriptors)
                     {
+                        descriptor.RelativePath = '/' + module.SubPath + descriptor.RelativePath;
                         feature.ViewDescriptors.Add(descriptor);
                     }
-                }
 
-                moduleFeature.ViewDescriptors.Clear();
+                    // For the app's module we still allow to explicitly specify view paths relative to the app content root.
+                    // So for the application's module we re-apply the feature providers without updating the relative paths.
+                    // Note: This is only needed in prod mode if app's views are precompiled and views files no longer exist.
+                    if (module.Name == _hostingEnvironment.ApplicationName)
+                    {
+                        foreach (var provider in mvcFeatureProviders)
+                        {
+                            provider.PopulateFeature(applicationPart, moduleFeature);
+                        }
+
+                        foreach (var descriptor in moduleFeature.ViewDescriptors)
+                        {
+                            feature.ViewDescriptors.Add(descriptor);
+                        }
+                    }
+
+                    moduleFeature.ViewDescriptors.Clear();
+                }
             }
         }
 
